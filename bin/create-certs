@@ -1,0 +1,99 @@
+#! /usr/bin/env bash
+
+## author: torstein, torstein@skybert.net
+
+set -o errexit
+set -o nounset
+set -o pipefail
+
+
+create_root_ca() {
+  local dir=$1
+  cd "${dir}" || exit 1
+
+  # Root CA — self-signed, long-lived, the anchor of trust for both sides
+  openssl \
+    req -x509 \
+    -newkey rsa:4096 \
+    -sha256 -days 3650 \
+    -nodes \
+    -keyout ca.key \
+    -out ca.crt \
+    -subj "/CN=mellon/O=moria/C=no" \
+    -addext "basicConstraints=critical,CA:TRUE,pathlen:0" \
+    -addext "keyUsage=critical,keyCertSign,cRLSign"
+}
+
+create_server_key_and_csr() {
+  local dir=$1
+  cd "${dir}" || exit 1
+
+  openssl \
+    req \
+    -newkey rsa:2048 \
+    -nodes \
+    -keyout server.key \
+    -out server.csr \
+    -subj "/CN=localhost/O=skybert"
+}
+
+create_client_key_and_csr() {
+  openssl \
+    req \
+    -newkey rsa:2048 \
+    -nodes \
+    -keyout client.key \
+    -out client.csr \
+    -subj "/CN=gandalf/OU=wizard/O=skybert"
+}
+
+sign_server_key() {
+  local dir=$1
+  cd "${dir}" || exit 1
+
+  openssl \
+    x509 \
+    -req \
+    -in server.csr \
+    -CA ca.crt \
+    -CAkey ca.key \
+    -CAcreateserial \
+    -out server.crt \
+    -days 825 \
+    -sha256 \
+    -extfile <(printf "subjectAltName=DNS:localhost,DNS:mellon.local,IP:127.0.0.1\nbasicConstraints=critical,CA:FALSE\nkeyUsage=critical,digitalSignature,keyEncipherment\nextendedKeyUsage=serverAuth\n")
+}
+
+sign_client_key() {
+  # Sign the client cert. No SAN needed; clientAuth EKU instead of
+  # serverAuth.
+  openssl \
+    x509 \
+    -req \
+    -in client.csr \
+    -CA ca.crt \
+    -CAkey ca.key \
+    -CAcreateserial \
+    -out client.crt \
+    -days 825 \
+    -sha256 \
+    -extfile <(printf "basicConstraints=critical,CA:FALSE\nkeyUsage=critical,digitalSignature\nextendedKeyUsage=clientAuth\n")
+}
+
+
+main() {
+  local _cwd=
+  _cwd="$(cd "$(dirname "${BASH_SOURCE[0]}")" &> /dev/null && pwd)"
+  _certs_dir="${_cwd}/../etc/certs"
+  mkdir -p "${_certs_dir}"
+
+  create_root_ca "${_certs_dir}"
+  create_server_key_and_csr "${_certs_dir}"
+  sign_server_key "${_certs_dir}"
+  create_client_key_and_csr "${_certs_dir}"
+  sign_client_key "${_certs_dir}"
+
+  find "${_certs_dir}"
+}
+
+main "$@"
