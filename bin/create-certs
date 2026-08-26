@@ -38,6 +38,8 @@ create_server_key_and_csr() {
 }
 
 create_client_key_and_csr() {
+  local dir=$1
+  cd "${dir}" || exit 1
   openssl \
     req \
     -newkey rsa:2048 \
@@ -47,7 +49,7 @@ create_client_key_and_csr() {
     -subj "/CN=gandalf/OU=wizard/O=skybert"
 }
 
-sign_server_key() {
+sign_server_cert() {
   local dir=$1
   cd "${dir}" || exit 1
 
@@ -64,7 +66,29 @@ sign_server_key() {
     -extfile <(printf "subjectAltName=DNS:localhost,DNS:mellon.local,IP:127.0.0.1\nbasicConstraints=critical,CA:FALSE\nkeyUsage=critical,digitalSignature,keyEncipherment\nextendedKeyUsage=serverAuth\n")
 }
 
-sign_client_key() {
+create_client_p12_bundle() {
+  local dir=$1
+  local client_crt=$2
+  cd "${dir}" || exit 1
+
+  fn=$(basename "${client_crt}" .crt)
+
+  openssl \
+    pkcs12 \
+    -export \
+    -out "${fn}".p12 \
+    -inkey "${fn}".key \
+    -in "${fn}".crt \
+    -certfile ca.crt \
+    -name "${fn} client" \
+    -passout pass:changeit
+}
+
+sign_client_cert() {
+  local dir=$1
+  local client_crt=$2
+  cd "${dir}" || exit 1
+
   # Sign the client cert. No SAN needed; clientAuth EKU instead of
   # serverAuth.
   openssl \
@@ -74,7 +98,7 @@ sign_client_key() {
     -CA ca.crt \
     -CAkey ca.key \
     -CAcreateserial \
-    -out client.crt \
+    -out "${client_crt}" \
     -days 825 \
     -sha256 \
     -extfile <(printf "basicConstraints=critical,CA:FALSE\nkeyUsage=critical,digitalSignature\nextendedKeyUsage=clientAuth\n")
@@ -99,9 +123,11 @@ main() {
 
   create_root_ca "${_certs_dir}"
   create_server_key_and_csr "${_certs_dir}"
-  sign_server_key "${_certs_dir}"
+  sign_server_cert "${_certs_dir}"
+
   create_client_key_and_csr "${_certs_dir}"
-  sign_client_key "${_certs_dir}"
+  sign_client_cert "${_certs_dir}" client.crt
+  create_client_p12_bundle "${_certs_dir}" client.crt
 
   verify_server_and_client_certs "${_certs_dir}"
 

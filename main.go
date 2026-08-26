@@ -16,18 +16,6 @@ import (
 	_ "github.com/danielgtaylor/huma/v2/formats/cbor"
 )
 
-// Options for the CLI. Pass `--port` or set the `SERVICE_PORT` env var.
-type Options struct {
-	Port int `help:"Port to listen on" short:"p" default:"8888"`
-}
-
-// GreetingOutput represents the greeting operation response.
-type GreetingOutput struct {
-	Body struct {
-		Message string `json:"message" example:"Hello, world!" doc:"Greeting message"`
-	}
-}
-
 func main() {
 	pool := certPool("etc/certs/ca.crt")
 
@@ -39,13 +27,16 @@ func main() {
 			TLSConfig: &tls.Config{
 				ClientAuth: tls.RequireAndVerifyClientCert,
 				ClientCAs:  pool,
-				MinVersion: tls.VersionTLS12,
+				MinVersion: tls.VersionTLS13,
 			},
 		}
-		api := humago.New(router, huma.DefaultConfig("Mellon", "0.0.1"))
-		addRoutes(api)
+		api := humago.New(router, huma.DefaultConfig(
+			"Mellon - speak friend and enter",
+			"0.0.1"))
 		addMiddleware(api)
+		addRoutes(api)
 		hooks.OnStart(func() {
+			fmt.Printf("Mellon listening on port %v\n", options.Port)
 			err := srv.ListenAndServeTLS(
 				"etc/certs/server.crt",
 				"etc/certs/server.key",
@@ -69,7 +60,7 @@ const (
 func addMiddleware(api huma.API) {
 	api.UseMiddleware(
 		func(ctx huma.Context, next func(huma.Context)) {
-			// read the request, ignore the response
+			// read the original request, ignore the response
 			r, _ := humago.Unwrap(ctx)
 			ctx = huma.WithValue(ctx, reqKey, r)
 			ctx = huma.WithValue(ctx, tlsKey, ctx.TLS())
@@ -85,21 +76,63 @@ func certPool(caCert string) *x509.CertPool {
 	}
 	pool := x509.NewCertPool()
 	if !pool.AppendCertsFromPEM(caPEM) {
-		log.Fatal("couldn't add certs")
+		log.Fatal("couldn't add certificates")
 	}
 
 	return pool
 }
 
 func addRoutes(api huma.API) {
-	huma.Get(api, "/greeting/{name}", func(ctx context.Context, input *struct {
-		Name string `path:"name" maxLength:"30" example:"world" doc:"Name to greet"`
-	}) (*GreetingOutput, error) {
+	huma.Get(api, "/greeting/{name}", func(ctx context.Context, input *GreetingInput) (*GreetingOutput, error) {
 		treq, _ := ctx.Value(tlsKey).(*tls.ConnectionState)
-		fmt.Printf("%v\n", treq)
+		if treq == nil {
+			return nil, huma.Error400BadRequest("Only mTLS is supported")
+		}
 
 		resp := &GreetingOutput{}
-		resp.Body.Message = fmt.Sprintf("Hello, %s!", input.Name)
+		for i, vc := range treq.VerifiedChains {
+			for j, vcc := range vc {
+				fmt.Printf(
+					"Verified chain: %d/%d, subject: %v, issuer: %v, ca: %t\n",
+					i,
+					j,
+					vcc.Subject,
+					vcc.Issuer.String(),
+					vcc.IsCA)
+			}
+		}
+
+		if len(treq.PeerCertificates) == 0 {
+			// Impossible as long as we're using
+			// ClientAuth: tls.RequireAndVerifyClientCert,
+			// see above.
+			return nil, huma.Error400BadRequest("Only mTLS is supported")
+		}
+
+		// The First leaf in the verified chain(s) is be
+		// the client's certificate according to the standard lib doc.
+		clientCertInVerifiedChain := treq.VerifiedChains[0][0]
+		clientCert := treq.PeerCertificates[0]
+		if clientCertInVerifiedChain.Subject.String() == clientCert.Subject.String() {
+			resp.Body.Message = fmt.Sprintf(
+				"Hi, %s you're connected using mTLS", clientCert.Subject.CommonName)
+			resp.Body.ClientCert = fmt.Sprintf(
+				"subject: %s, issuer: %s",
+				clientCert.Subject.String(),
+				clientCert.Issuer.String())
+			resp.Body.Crypto = cryptoInfo(treq, clientCert)
+		}
+
 		return resp, nil
 	})
+}
+
+func cryptoInfo(treq *tls.ConnectionState, cert *x509.Certificate) string {
+	return fmt.Sprintf(
+		"public key alg: %s, signing alg: %s, TLS version: %v, TLS cipher suite used: %v",
+		cert.PublicKeyAlgorithm.String(),
+		cert.SignatureAlgorithm.String(),
+		tls.VersionName(treq.Version),
+		tls.CipherSuiteName(treq.CipherSuite),
+	)
 }
