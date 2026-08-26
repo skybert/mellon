@@ -2,8 +2,12 @@ package main
 
 import (
 	"context"
+	"crypto/tls"
+	"crypto/x509"
 	"fmt"
+	"log"
 	"net/http"
+	"os"
 
 	"github.com/danielgtaylor/huma/v2"
 	"github.com/danielgtaylor/huma/v2/adapters/humago"
@@ -25,21 +29,43 @@ type GreetingOutput struct {
 }
 
 func main() {
-	// Create a CLI app which takes a port option.
+	pool := certPool("etc/certs/ca.crt")
+
 	cli := humacli.New(func(hooks humacli.Hooks, options *Options) {
-		// Create a new router & API
 		router := http.NewServeMux()
+		srv := &http.Server{
+			Addr:    fmt.Sprintf(":%d", options.Port),
+			Handler: router,
+			TLSConfig: &tls.Config{
+				ClientAuth: tls.RequireAndVerifyClientCert,
+				ClientCAs:  pool,
+				MinVersion: tls.VersionTLS12,
+			},
+		}
 		api := humago.New(router, huma.DefaultConfig("Mellon", "0.0.1"))
-
-		// Add the operation handler to the API.
 		addRoutes(api)
-
 		hooks.OnStart(func() {
-			http.ListenAndServe(fmt.Sprintf(":%d", options.Port), router)
+			srv.ListenAndServeTLS(
+				"etc/certs/server.crt",
+				"etc/certs/server.key",
+			)
 		})
 	})
 
 	cli.Run()
+}
+
+func certPool(caCert string) *x509.CertPool {
+	caPEM, err := os.ReadFile(caCert)
+	if err != nil {
+		log.Fatal(err)
+	}
+	pool := x509.NewCertPool()
+	if !pool.AppendCertsFromPEM(caPEM) {
+		log.Fatal("couldn't add certs")
+	}
+
+	return pool
 }
 
 func addRoutes(api huma.API) {

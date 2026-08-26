@@ -80,6 +80,16 @@ sign_client_key() {
     -extfile <(printf "basicConstraints=critical,CA:FALSE\nkeyUsage=critical,digitalSignature\nextendedKeyUsage=clientAuth\n")
 }
 
+verify_server_and_client_certs() {
+  local dir=$1
+  cd "${dir}" || exit 1
+
+  echo "Verify server and client certs against ca cert:"
+  openssl verify -CAfile ca.crt server.crt client.crt
+
+  echo "Server cert usage:"
+  openssl x509 -in server.crt -noout -subject -ext subjectAltName,extendedKeyUsage
+}
 
 main() {
   local _cwd=
@@ -92,6 +102,8 @@ main() {
   sign_server_key "${_certs_dir}"
   create_client_key_and_csr "${_certs_dir}"
   sign_client_key "${_certs_dir}"
+
+  verify_server_and_client_certs "${_certs_dir}"
 
   find "${_certs_dir}"
 }
