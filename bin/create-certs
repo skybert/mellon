@@ -19,7 +19,7 @@ create_root_ca() {
     -nodes \
     -keyout ca.key \
     -out ca.crt \
-    -subj "/CN=mellon/O=moria/C=no" \
+    -subj "/CN=mellon-ca/O=moria/C=no" \
     -addext "basicConstraints=critical,CA:TRUE,pathlen:0" \
     -addext "keyUsage=critical,keyCertSign,cRLSign"
 }
@@ -34,7 +34,7 @@ create_server_key_and_csr() {
     -nodes \
     -keyout server.key \
     -out server.csr \
-    -subj "/CN=localhost/O=skybert"
+    -subj "/CN=mellon/O=skybert"
 }
 
 create_client_key_and_csr() {
@@ -63,10 +63,10 @@ sign_server_cert() {
     -out server.crt \
     -days 825 \
     -sha256 \
-    -extfile <(printf "subjectAltName=DNS:localhost,DNS:mellon.local,IP:127.0.0.1\nbasicConstraints=critical,CA:FALSE\nkeyUsage=critical,digitalSignature,keyEncipherment\nextendedKeyUsage=serverAuth\n")
+    -extfile <(printf "subjectAltName=DNS:localhost,DNS:mellon.skybert,IP:127.0.0.1\nbasicConstraints=critical,CA:FALSE\nkeyUsage=critical,digitalSignature,keyEncipherment\nextendedKeyUsage=serverAuth\n")
 }
 
-create_client_p12_bundle() {
+create_p12_bundle() {
   local dir=$1
   local client_crt=$2
   cd "${dir}" || exit 1
@@ -127,7 +127,8 @@ main() {
 
   create_client_key_and_csr "${_certs_dir}"
   sign_client_cert "${_certs_dir}" client.crt
-  create_client_p12_bundle "${_certs_dir}" client.crt
+
+  create_p12_bundle "${_certs_dir}" client.crt
 
   verify_server_and_client_certs "${_certs_dir}"
 
