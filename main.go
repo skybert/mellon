@@ -44,15 +44,38 @@ func main() {
 		}
 		api := humago.New(router, huma.DefaultConfig("Mellon", "0.0.1"))
 		addRoutes(api)
+		addMiddleware(api)
 		hooks.OnStart(func() {
-			srv.ListenAndServeTLS(
+			err := srv.ListenAndServeTLS(
 				"etc/certs/server.crt",
 				"etc/certs/server.key",
 			)
+			if err != nil {
+				panic(err)
+			}
 		})
 	})
 
 	cli.Run()
+}
+
+type ctxKey string
+
+const (
+	reqKey ctxKey = "http.request"
+	tlsKey ctxKey = "tls.state"
+)
+
+func addMiddleware(api huma.API) {
+	api.UseMiddleware(
+		func(ctx huma.Context, next func(huma.Context)) {
+			// read the request, ignore the response
+			r, _ := humago.Unwrap(ctx)
+			ctx = huma.WithValue(ctx, reqKey, r)
+			ctx = huma.WithValue(ctx, tlsKey, ctx.TLS())
+			next(ctx)
+		},
+	)
 }
 
 func certPool(caCert string) *x509.CertPool {
@@ -72,6 +95,9 @@ func addRoutes(api huma.API) {
 	huma.Get(api, "/greeting/{name}", func(ctx context.Context, input *struct {
 		Name string `path:"name" maxLength:"30" example:"world" doc:"Name to greet"`
 	}) (*GreetingOutput, error) {
+		treq, _ := ctx.Value(tlsKey).(*tls.ConnectionState)
+		fmt.Printf("%v\n", treq)
+
 		resp := &GreetingOutput{}
 		resp.Body.Message = fmt.Sprintf("Hello, %s!", input.Name)
 		return resp, nil
