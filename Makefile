@@ -14,6 +14,9 @@ build: fmt
 run: build
 	./$(BUILDDIR)/$(BINARY)
 
+run_mtls_server:
+	go run mtls/server.go
+
 certs:
 	./bin/create-certs
 
