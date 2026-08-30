@@ -14,6 +14,9 @@ build: fmt
 run: build
 	./$(BUILDDIR)/$(BINARY)
 
+certs:
+	./bin/create-certs
+
 test:
 	go test ./...
 
@@ -43,4 +46,4 @@ dist:
 	@mkdir -p $(DISTDIR)
 	CGO_ENABLED=0 go build -ldflags "-X main.Version=$(VERSION)" -o dist/$(BINARY)-$(VERSION)-${GOOS}-${GOARCH} .
 
-.PHONY: all build test lint vulncheck fmt clean install man dist upgrade
+.PHONY: all build certs test lint vulncheck fmt clean install man dist upgrade
