@@ -29,7 +29,7 @@ const port = 9443
 func debugChains(chains [][]*x509.Certificate) {
 	for i, chain := range chains {
 		for j, cert := range chain {
-			fmt.Printf("%d/%d %v\n", i, j, cert.Subject)
+			fmt.Printf("%d/%d subject: %v issuer: %v\n", i, j, cert.Subject, cert.Issuer)
 		}
 	}
 }
