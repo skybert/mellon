@@ -1,0 +1,9 @@
+
+* mTLS features
+
+** ✅ mTLS aware and enforcing server in server.go
+** ✅ mTLS curl in client.sh
+** ✅ mTLS client in client.go
+** server return client cert bound token
+** client use client cert bound token
+** server verify cert bound token

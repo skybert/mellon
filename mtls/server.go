@@ -27,9 +27,10 @@ func certPool(caFile string) *x509.CertPool {
 const port = 9443
 
 func debugTLS(tlsConnection *tls.ConnectionState) {
+	clientCert := tlsConnection.PeerCertificates[0]
 	log.Printf("Public key alg: %s, signature alg: %s, TLS version: %s, cipher suite: %v\n",
-		tlsConnection.PeerCertificates[0].PublicKeyAlgorithm.String(),
-		tlsConnection.PeerCertificates[0].SignatureAlgorithm.String(),
+		clientCert.PublicKeyAlgorithm.String(),
+		clientCert.SignatureAlgorithm.String(),
 		tls.VersionName(tlsConnection.Version),
 		tls.CipherSuiteName(tlsConnection.CipherSuite),
 	)
@@ -77,6 +78,7 @@ func mtlsServer() *http.Server {
 
 func main() {
 	srv := mtlsServer()
+	log.Printf("Starting mTLS server on port %d", port)
 	err := srv.ListenAndServeTLS(
 		"etc/certs/server.crt",
 		"etc/certs/server.key",

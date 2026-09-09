@@ -14,8 +14,11 @@ build: fmt
 run: build
 	./$(BUILDDIR)/$(BINARY)
 
-run_mtls_server:
+mtls/server:
 	go run mtls/server.go
+
+mtls/client:
+	go run mtls/client/client.go
 
 certs:
 	./bin/create-certs
@@ -49,4 +52,4 @@ dist:
 	@mkdir -p $(DISTDIR)
 	CGO_ENABLED=0 go build -ldflags "-X main.Version=$(VERSION)" -o dist/$(BINARY)-$(VERSION)-${GOOS}-${GOARCH} .
 
-.PHONY: all build certs test lint vulncheck fmt clean install man dist upgrade
+.PHONY: all build certs test lint vulncheck fmt clean install man dist upgrade mtls/client mtls/server
