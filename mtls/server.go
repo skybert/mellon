@@ -26,10 +26,23 @@ func certPool(caFile string) *x509.CertPool {
 
 const port = 9443
 
-func debugChains(chains [][]*x509.Certificate) {
-	for i, chain := range chains {
+func debugTLS(tlsConnection *tls.ConnectionState) {
+	log.Printf("Public key alg: %s, signature alg: %s, TLS version: %s, cipher suite: %v\n",
+		tlsConnection.PeerCertificates[0].PublicKeyAlgorithm.String(),
+		tlsConnection.PeerCertificates[0].SignatureAlgorithm.String(),
+		tls.VersionName(tlsConnection.Version),
+		tls.CipherSuiteName(tlsConnection.CipherSuite),
+	)
+
+	for i, chain := range tlsConnection.VerifiedChains {
 		for j, cert := range chain {
-			fmt.Printf("%d/%d subject: %v issuer: %v\n", i, j, cert.Subject, cert.Issuer)
+			log.Printf(
+				"\tVerified chain: %d/%d subject: %v issuer: %v ca: %t\n",
+				i,
+				j,
+				cert.Subject,
+				cert.Issuer,
+				cert.IsCA)
 		}
 	}
 }
@@ -38,7 +51,7 @@ func addRoutes(router *http.ServeMux) {
 	router.HandleFunc(
 		"/ping",
 		func(w http.ResponseWriter, req *http.Request) {
-			debugChains(req.TLS.VerifiedChains)
+			debugTLS(req.TLS)
 			io.WriteString(w, "pong\n")
 		})
 }
