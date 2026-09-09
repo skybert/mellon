@@ -74,7 +74,7 @@ func (c *mtlsClient) CertThumbPrint() string {
 	return string(urlEncodedHash)
 }
 
-func addRoutes(router *http.ServeMux, clients *[]mtlsClient) {
+func addRoutes(router *http.ServeMux, allowedClients []mtlsClient) {
 	router.HandleFunc(
 		"/ping",
 		func(w http.ResponseWriter, req *http.Request) {
@@ -85,8 +85,17 @@ func addRoutes(router *http.ServeMux, clients *[]mtlsClient) {
 		"/mtls-token",
 		func(w http.ResponseWriter, req *http.Request) {
 			debugTLS(req.TLS)
-			t := ""
-			io.WriteString(w, t)
+			if allowedClient(req, allowedClients) {
+				t := ""
+				io.WriteString(w, t)
+			} else {
+				// See:
+				// - https://www.rfc-editor.org/rfc/rfc8705.html#section-2-3
+				// - https://www.rfc-editor.org/info/rfc6749/#section-5.2
+				w.WriteHeader(400)
+				io.WriteString(w, "invalid_client")
+			}
+
 		})
 	router.HandleFunc(
 		"/mtls-introspect",
@@ -97,10 +106,41 @@ func addRoutes(router *http.ServeMux, clients *[]mtlsClient) {
 		})
 }
 
-func mtlsServer(clients *[]mtlsClient) *http.Server {
+func allowedClient(req *http.Request, allowedClients []mtlsClient) bool {
+	if err := req.ParseForm(); err != nil {
+		return false
+	}
+	clientID := req.FormValue("client_id")
+
+	// exit/fail fast
+	if clientID == "" {
+		return false
+	}
+
+	for _, allowedClient := range allowedClients {
+		if allowedClient.clientID == clientID {
+			// validates according to spec
+			// https://www.rfc-editor.org/rfc/rfc8705.html#section-2.1
+			reqSubject := req.TLS.PeerCertificates[0].Subject.String()
+			log.Printf(
+				"\treq sub=%s, registered client_id=%s has defined allowed sub=%s, match=%t\n",
+				reqSubject,
+				allowedClient.clientID,
+				allowedClient.clientSubject,
+				reqSubject == allowedClient.clientSubject,
+			)
+
+			return reqSubject == allowedClient.clientSubject
+		}
+	}
+
+	return false
+}
+
+func mtlsServer(allowedClients []mtlsClient) *http.Server {
 	certPool := certPool("etc/certs/ca.crt")
 	router := http.NewServeMux()
-	addRoutes(router, clients)
+	addRoutes(router, allowedClients)
 
 	srv := &http.Server{
 		Addr:    fmt.Sprintf(":%d", port),
@@ -132,7 +172,9 @@ func main() {
 	}
 }
 
-func registerClients(fn string) *[]mtlsClient {
+func registerClients(fn string) []mtlsClient {
+	// TODO read a list of client certs
+
 	s, err := os.ReadFile(fn)
 	if err != nil {
 		log.Fatal(err)
@@ -147,7 +189,7 @@ func registerClients(fn string) *[]mtlsClient {
 	}
 
 	// client id is the base name of fn
-	return &[]mtlsClient{
+	return []mtlsClient{
 		{
 			// the base file name is the client id
 			clientID:   path.Base(fn),

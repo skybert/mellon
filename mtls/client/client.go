@@ -6,6 +6,7 @@ import (
 	"io"
 	"log"
 	"net/http"
+	"net/url"
 	"os"
 )
 
@@ -36,7 +37,13 @@ func main() {
 	client := mtlsClient()
 
 	uri := "https://mellon.skybert:9443/ping"
-	resp, err := client.Get(uri)
+	if len(os.Args) == 2 {
+		uri = os.Args[1]
+	}
+
+	values := url.Values{}
+	values.Add("client_id", "client.crt")
+	resp, err := client.PostForm(uri, values)
 	if err != nil {
 		log.Fatal(err)
 	}
