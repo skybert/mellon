@@ -82,5 +82,8 @@ $  openssl \
 
 ```
 
+# AI policy
 
+No AI generated code. Everything that a human will read, is written by
+a human.
 
