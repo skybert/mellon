@@ -5,6 +5,7 @@ import (
 	"crypto/tls"
 	"crypto/x509"
 	"encoding/base64"
+	"encoding/json"
 	"encoding/pem"
 	"fmt"
 	"io"
@@ -60,6 +61,18 @@ type mtlsClient struct {
 	clientSubject string
 }
 
+type cnf struct {
+	X5tS256 string `json:"x5t#S256"`
+}
+
+type mtlsToken struct {
+	Iss string `json:"iss"`
+	Sub string `json:"sub"`
+	Exp int64  `json:"exp"`
+	Nbf int64  `json:"nbf"`
+	Cnf cnf    `json:"cnf"`
+}
+
 func (c *mtlsClient) CertThumbPrint() string {
 	// https://www.rfc-editor.org/rfc/rfc8705.html#section-3.1-2
 	// (1) DER encode cert, returned in clientCert.Raw
@@ -85,9 +98,23 @@ func addRoutes(router *http.ServeMux, allowedClients []mtlsClient) {
 		"/mtls-token",
 		func(w http.ResponseWriter, req *http.Request) {
 			debugTLS(req.TLS)
-			if allowedClient(req, allowedClients) {
-				t := ""
-				io.WriteString(w, t)
+			if a, ac := allowedClient(req, allowedClients); a {
+				t := mtlsToken{
+					Iss: "",
+					Sub: "",
+					Exp: 0,
+					Nbf: 0,
+					Cnf: cnf{
+						ac.CertThumbPrint(),
+					},
+				}
+				j, err := json.Marshal(t)
+				if err != nil {
+					log.Printf("err=%v\n", err)
+
+				}
+
+				io.WriteString(w, string(j))
 			} else {
 				// See:
 				// - https://www.rfc-editor.org/rfc/rfc8705.html#section-2-3
@@ -106,15 +133,15 @@ func addRoutes(router *http.ServeMux, allowedClients []mtlsClient) {
 		})
 }
 
-func allowedClient(req *http.Request, allowedClients []mtlsClient) bool {
+func allowedClient(req *http.Request, allowedClients []mtlsClient) (bool, mtlsClient) {
 	if err := req.ParseForm(); err != nil {
-		return false
+		return false, mtlsClient{}
 	}
 	clientID := req.FormValue("client_id")
 
 	// exit/fail fast
 	if clientID == "" {
-		return false
+		return false, mtlsClient{}
 	}
 
 	for _, allowedClient := range allowedClients {
@@ -130,11 +157,13 @@ func allowedClient(req *http.Request, allowedClients []mtlsClient) bool {
 				reqSubject == allowedClient.clientSubject,
 			)
 
-			return reqSubject == allowedClient.clientSubject
+			if reqSubject == allowedClient.clientSubject {
+				return true, allowedClient
+			}
 		}
 	}
 
-	return false
+	return false, mtlsClient{}
 }
 
 func mtlsServer(allowedClients []mtlsClient) *http.Server {
