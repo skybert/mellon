@@ -1,11 +1,11 @@
 package main
 
 import (
+	"crypto/rsa"
 	"crypto/sha256"
 	"crypto/tls"
 	"crypto/x509"
 	"encoding/base64"
-	"encoding/json"
 	"encoding/pem"
 	"fmt"
 	"io"
@@ -13,6 +13,9 @@ import (
 	"net/http"
 	"os"
 	"path"
+	"strconv"
+
+	"github.com/golang-jwt/jwt/v5"
 )
 
 func certPool(caFile string) *x509.CertPool {
@@ -87,7 +90,10 @@ func (c *mtlsClient) CertThumbPrint() string {
 	return string(urlEncodedHash)
 }
 
-func addRoutes(router *http.ServeMux, allowedClients []mtlsClient) {
+func addRoutes(
+	router *http.ServeMux,
+	signingKey *rsa.PrivateKey,
+	allowedClients []mtlsClient) {
 	router.HandleFunc(
 		"/ping",
 		func(w http.ResponseWriter, req *http.Request) {
@@ -99,22 +105,8 @@ func addRoutes(router *http.ServeMux, allowedClients []mtlsClient) {
 		func(w http.ResponseWriter, req *http.Request) {
 			debugTLS(req.TLS)
 			if a, ac := allowedClient(req, allowedClients); a {
-				t := mtlsToken{
-					Iss: "",
-					Sub: "",
-					Exp: 0,
-					Nbf: 0,
-					Cnf: cnf{
-						ac.CertThumbPrint(),
-					},
-				}
-				j, err := json.Marshal(t)
-				if err != nil {
-					log.Printf("err=%v\n", err)
-
-				}
-
-				io.WriteString(w, string(j))
+				token := createJWT(signingKey, ac)
+				io.WriteString(w, token)
 			} else {
 				// See:
 				// - https://www.rfc-editor.org/rfc/rfc8705.html#section-2-3
@@ -131,6 +123,25 @@ func addRoutes(router *http.ServeMux, allowedClients []mtlsClient) {
 			t := ""
 			io.WriteString(w, t)
 		})
+}
+
+func createJWT(signingKey *rsa.PrivateKey, ac mtlsClient) string {
+
+	t := jwt.NewWithClaims(jwt.SigningMethodRS256,
+		jwt.MapClaims{
+			"iss": "https://mellon.skybert:" + strconv.Itoa(port),
+			"sub": ac.clientSubject,
+			"cnf": map[string]interface{}{
+				"x5t#S256": ac.CertThumbPrint(),
+			},
+		})
+
+	signedToken, err := t.SignedString(signingKey)
+	if err != nil {
+		log.Fatal(err)
+	}
+
+	return signedToken
 }
 
 func allowedClient(req *http.Request, allowedClients []mtlsClient) (bool, mtlsClient) {
@@ -166,10 +177,11 @@ func allowedClient(req *http.Request, allowedClients []mtlsClient) (bool, mtlsCl
 	return false, mtlsClient{}
 }
 
-func mtlsServer(allowedClients []mtlsClient) *http.Server {
+func mtlsServer(serverSigningKey *rsa.PrivateKey, allowedClients []mtlsClient) *http.Server {
+
 	certPool := certPool("etc/certs/ca.crt")
 	router := http.NewServeMux()
-	addRoutes(router, allowedClients)
+	addRoutes(router, serverSigningKey, allowedClients)
 
 	srv := &http.Server{
 		Addr:    fmt.Sprintf(":%d", port),
@@ -182,23 +194,39 @@ func mtlsServer(allowedClients []mtlsClient) *http.Server {
 	}
 
 	return srv
-
 }
 
 func main() {
 	clients := registerClients("etc/certs/client.crt")
 	fmt.Printf("Allowed mTLS clients: %v\n", clients)
+	serverKeyFile := "etc/certs/server.key"
+	serverSigningKey := signingKey(serverKeyFile)
 
-	srv := mtlsServer(clients)
+	srv := mtlsServer(serverSigningKey, clients)
 	log.Printf("Starting mTLS server on port %d", port)
 	err := srv.ListenAndServeTLS(
 		"etc/certs/server.crt",
-		"etc/certs/server.key",
+		serverKeyFile,
 	)
 
 	if err != nil {
 		log.Fatal(err)
 	}
+}
+
+func signingKey(serverKeyFile string) *rsa.PrivateKey {
+	pem, err := os.ReadFile(serverKeyFile)
+	if err != nil {
+		log.Fatal(err)
+	}
+
+	privateKey, err := jwt.ParseRSAPrivateKeyFromPEM(pem)
+	if err != nil {
+		log.Fatal(err)
+	}
+
+	return privateKey
+
 }
 
 func registerClients(fn string) []mtlsClient {
